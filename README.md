@@ -14,4 +14,4 @@ v2:
 - on/off relay with mr.Quat's message frame
 
 v3:
-- on/off
+- new message frame
