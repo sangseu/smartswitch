@@ -19,16 +19,15 @@ const uint16_t t_retry_conn_wifi = 90; //(s)
 const uint16_t t_retry_conn_mqtt = 5; //(times*5(s))
 const uint16_t t_wait_config = 1; //(s)
 
-String s2 = "switch/" + getID() + "/out";
-String s3 = "switch/" + getID() + "/in";
-const char* topic_pub = &s2[0];
-const char* topic_sub = &s3[0];
+const char* topic_pub = "myswitch/00000001/stt";
+const char* topic_pub_ping = "myswitch/00000001/ping";
+const char* topic_sub = "myswitch/00000001/ctrl";
 
 #define relay1 14
 #define relay2 12
 #define relay3 13
 
-byte r = 0;
+byte r = 0; // status relay in byte
 //=============================================
 //normally DEBUG is commented out
 #define DEBUG
@@ -45,7 +44,7 @@ pfodESP8266BufferedClient bufferedClient;
 
 // =============== start of pfodWifiWebConfig settings ==============
 #define pfodWifiWebConfigPASSWORD "123456789"
-#define pfodWifiWebConfigAP "esp_00000000"//================================================
+#define pfodWifiWebConfigAP "SWITCH-00000001"//==========================CONFIG=================
 
 // note pfodSecurity uses 19 bytes of eeprom usually starting from 0 so
 // start the eeprom address from 20 for configureWifiConfig
@@ -180,7 +179,7 @@ void loop() {
   }
   clientPS.loop();
 
-  check_relay();
+  //check_relay();
 
   
 
@@ -191,7 +190,7 @@ void loop() {
 
     String s = getID();
     char* c = &s[0];
-    clientPS.publish(topic_pub, c);
+    clientPS.publish(topic_pub_ping, c);
     Serial.println("tick");
   }//end if  
 }//===============================================================================end LOOP
@@ -441,7 +440,7 @@ void reconnect() {
     String s = getID();
     char* ID = &s[0];
     if (clientPS.connect(ID)) {
-      check_relay();
+      //check_relay();
       Serial.println("connected");
       // Once connected, publish an announcement...
       clientPS.publish(topic_pub, "ESP_reconnected");
@@ -528,8 +527,41 @@ void callback(char* topic, byte* payload, unsigned int length)
   for (int i = 0; i < length; i++) {
     Serial.print((char)payload[i]);
   }
+  Serial.print("]");
   Serial.println();
-  
+
+  /*
+  //===============================Arduino control relay
+  int relay, to_relay;
+  if (payload[0] == '1') relay = 1;
+  if (payload[0] == '2') relay = 2;
+  if (payload[0] == '3') relay = 3;
+  if (payload[2] == '1') to_relay = 1;
+  if (payload[2] == '0') to_relay = 0;
+  switch (relay) {
+    case 1: digitalWrite(relay1, to_relay); break;
+    case 2: digitalWrite(relay2, to_relay); break;
+    case 3: digitalWrite(relay3, to_relay); break;
+  }
+  */
+
+  //=============================== return status
+  //String sw_stt = sw_state(); Serial.println(sw_stt);
+  //char* c_sw_stt = &sw_stt[0];
+  char* a = "OK";
+  clientPS.publish(topic_pub, a, true); // PUBLIC status of 3 Switch, retained = true
+
+}
+
+String sw_state() {
+  String s = "";
+  if(!digitalRead(relay1)) s+="1";
+  else s+="0";
+  if(!digitalRead(relay2)) s+="1";
+  else s+="0";
+  if(!digitalRead(relay3)) s+="1";
+  else s+="0";
+  return s;
 }
 
 byte relay_stt() {
@@ -540,6 +572,8 @@ byte relay_stt() {
   r = r1|r2|r3;
   return r; 
 }
+
+
 
 void check_relay() {
   if(r != relay_stt()) {
