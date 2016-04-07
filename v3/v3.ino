@@ -9,13 +9,13 @@
 //PubSub
 #include <PubSubClient.h>
 //=============================================
-#define wifiSetup_pin 4
+#define wifiSetup_pin 16
 //=============================================
 //PubSub
 #define mqtt_server "128.199.139.40"
 const uint16_t mqtt_port = 1883;
 const uint16_t f_pub = 5000; //(ms)
-const uint16_t t_retry_conn_wifi = 5; //(s)
+const uint16_t t_retry_conn_wifi = 90; //(s)
 const uint16_t t_retry_conn_mqtt = 5; //(times*5(s))
 const uint16_t t_wait_config = 1; //(s)
 
@@ -44,7 +44,7 @@ pfodESP8266BufferedClient bufferedClient;
 
 // =============== start of pfodWifiWebConfig settings ==============
 #define pfodWifiWebConfigPASSWORD "123456789"
-#define pfodWifiWebConfigAP "SWITCH-00000001"//==========================CONFIG=================
+#define pfodWifiWebConfigAP "00000001"//==========================CONFIG=================
 
 // note pfodSecurity uses 19 bytes of eeprom usually starting from 0 so
 // start the eeprom address from 20 for configureWifiConfig
@@ -85,7 +85,7 @@ void setup ( void ) {
   pinMode(relay1, INPUT);
   pinMode(relay2, INPUT);
   pinMode(relay3, INPUT);
-  
+
   WiFi.mode(WIFI_STA);
   inConfigMode = 0; // non in config mode
   EEPROM.begin(512); // must be greater than (wifiConfigStartAddress + EEPROM_storageSize)
@@ -100,35 +100,37 @@ void setup ( void ) {
     delay(1000);
   }
   //esp need Serial to debug
-  Serial.begin(115200);
+  Serial.begin(9600);
 #ifdef DEBUG
   Serial.println();
   Serial.println(F("Starting Setup"));
   //  bufferedClient.setDebugStream(&Serial);  // add this line if using DEBUG in pfodESP8266BufferedClient library code
 #endif
 
-  //=============================================================20s to put GPIO16-220ohm-GND
+  //=========================================20s to put GPIO16-220ohm-GND
   //pinMode(wifiSetup_pin, INPUT_PULLUP);
   pinMode(wifiSetup_pin, INPUT);
   Serial.println();
 
-  /*
   //=====================================================================
-  // see if config button is pressed ~> time out connection
-  if (digitalRead(wifiSetup_pin) == HIGH) {
-  
-    inConfigMode = 1; // in config mode
-    WiFi.mode(WIFI_AP_STA);
+  for (int i = 7; i > 0; i--) {
+    // see if config button is pressed ~> time out connection
+    if (digitalRead(wifiSetup_pin) == HIGH) {
+
+      inConfigMode = 1; // in config mode
+      WiFi.mode(WIFI_AP_STA);
 #ifdef DEBUG
-    Serial.println(F("Setting up Access Point for WifiWebConfig"));
+      Serial.println(F("\nSetting up Access Point for WifiWebConfig"));
 #endif
-    // connect to temporary wifi network for setup
-    // the features determine the format of the {set...} command
-    setupAP(pfodWifiWebConfigAP, pfodWifiWebConfigPASSWORD);
-    //   Need to reboot afterwards
-    return; // skip rest of setup();
+      // connect to temporary wifi network for setup
+      // the features determine the format of the {set...} command
+      setupAP(pfodWifiWebConfigAP, pfodWifiWebConfigPASSWORD);
+      //   Need to reboot afterwards
+      return; // skip rest of setup();
+    }
+    Serial.println(i);
+    delay(1000);
   }
-  */
 
   //else button was not pressed continue to load the stored network settings
   //use configured setttings from EEPROM
@@ -167,6 +169,8 @@ size_t sendBufferIdx = 0;
 // the loop routine runs over and over again forever:
 void loop() {
 
+  Serial.println((String)millis());
+
   if (inConfigMode) {
     webserver.handleClient();
     delay(0);
@@ -181,7 +185,7 @@ void loop() {
 
   //check_relay();
 
-  
+
 
   long now = millis();
   if (now - lastMsg > f_pub)
@@ -192,7 +196,7 @@ void loop() {
     char* c = &s[0];
     clientPS.publish(topic_pub_ping, c);
     Serial.println("tick");
-  }//end if  
+  }//end if
 }//===============================================================================end LOOP
 
 
@@ -219,8 +223,8 @@ void setupAP(const char* ssid_wifi, const char* password_wifi) {
   Serial.println(myIP);
 #endif
   delay(10);
-  webserver.on ( "/", handleRoot );
-  webserver.on ( "/config", handleConfig );
+  webserver.on ( "/root", handleRoot );
+  webserver.on ( "/", handleConfig );
   webserver.onNotFound ( handleNotFound );
   webserver.begin();
 #ifdef DEBUG
@@ -253,6 +257,7 @@ void handleConfig() {
     uint8_t numOfArgs = webserver.args();
     const char *strPtr;
     uint8_t i = 0;
+    //=================
     for (; (i < numOfArgs); i++ ) {
       // check field numbers
       if (webserver.argName(i)[0] == '1') {
@@ -299,6 +304,7 @@ void handleConfig() {
         storage.timeout = (uint32_t)(timeoutSec * 1000);
       }
     }
+    //===========================
 
     uint8_t * byteStorage = (uint8_t *)&storage;
     for (size_t i = 0; i < EEPROM_storageSize; i++) {
@@ -349,7 +355,7 @@ void handleConfig() {
   "</html>";
 
   webserver.send ( 200, "text/html", rtnMsg );
-  delay(3000);
+  delay(1000);
   ESP.reset();//pull up 10k resistor to RESET pin.
   //=======================================================================reset esp
 }
@@ -465,8 +471,8 @@ void reconnect() {
 void setupWifi()
 {
   //Setup Wi-Fi
-  WiFi.begin(storage.ssid, storage.password);//===============================
-  int retry = 0; //20s
+  WiFi.begin(storage.ssid, storage.password);
+  int retry = 0;
   while (WiFi.status() != WL_CONNECTED) {//retry 20s, if cannot connect, esp will as STA
     delay(1000);
     if (retry >= t_retry_conn_wifi)
@@ -523,7 +529,7 @@ void callback(char* topic, byte* payload, unsigned int length)
 {
   Serial.println();
   Serial.print("<- [");
-  
+
   for (int i = 0; i < length; i++) {
     Serial.print((char)payload[i]);
   }
@@ -555,30 +561,30 @@ void callback(char* topic, byte* payload, unsigned int length)
 
 String sw_state() {
   String s = "";
-  if(!digitalRead(relay1)) s+="1";
-  else s+="0";
-  if(!digitalRead(relay2)) s+="1";
-  else s+="0";
-  if(!digitalRead(relay3)) s+="1";
-  else s+="0";
+  if (!digitalRead(relay1)) s += "1";
+  else s += "0";
+  if (!digitalRead(relay2)) s += "1";
+  else s += "0";
+  if (!digitalRead(relay3)) s += "1";
+  else s += "0";
   return s;
 }
 
 byte relay_stt() {
   byte r1 = 0; byte r2 = 0; byte r3 = 0;
-  r1 |= (!digitalRead(relay1))<<0;
-  r2 |= (!digitalRead(relay2))<<1;
-  r3 |= (!digitalRead(relay3))<<2;
-  r = r1|r2|r3;
-  return r; 
+  r1 |= (!digitalRead(relay1)) << 0;
+  r2 |= (!digitalRead(relay2)) << 1;
+  r3 |= (!digitalRead(relay3)) << 2;
+  r = r1 | r2 | r3;
+  return r;
 }
 
 
 
 void check_relay() {
-  if(r != relay_stt()) {
+  if (r != relay_stt()) {
     Serial.println("tock");
-    String rl_stt = "#RL:"+String(relay_stt(), HEX);
+    String rl_stt = "#RL:" + String(relay_stt(), HEX);
     char* c_rl_stt = &rl_stt[0];
     clientPS.publish(topic_pub, c_rl_stt);
   }
