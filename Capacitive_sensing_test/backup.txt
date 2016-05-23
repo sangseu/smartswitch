@@ -1,0 +1,304 @@
+#include <CapacitiveSensor.h>
+
+#define rl1 10
+#define rl2 11
+#define rl3 12
+#define rl4 13
+
+#define led1 A0
+#define led2 A1
+#define led3 A2
+
+#define min1 160
+#define max1 500
+
+#define min2 160
+#define max2 500
+
+#define min3 140
+#define max3 500
+
+enum {Uart_GETSTARTCODE1 = 0, Uart_GETSTARTCODE2 = 1, Uart_GETDATA = 2} Uart_state;
+
+String cmd = "";
+const String r = "run";
+bool e_r = true;
+
+const String mAP = "mAP";
+bool e_mAP = false;
+
+const String w = "wai";
+bool e_w = false;
+
+//blink
+//int led = 4;           // the PWM pin the LED is attached to
+//int led2 = 5;
+int brightness1 = 0;    // how bright the LED is
+int brightness2 = 85;// 85-170-255
+int brightness3 = 170;
+
+int ap_brightness1 = 0;    // how bright the LED is
+int ap_brightness2 = 100;// 85-170-255
+int ap_brightness3 = 0;
+
+int fadeAmount1 = 1;    // how many points to fade the LED by
+int fadeAmount2 = 1;
+int fadeAmount3 = 1;
+
+int ap_fadeAmount1 = 1;    // how many points to fade the LED by
+int ap_fadeAmount2 = 1;
+int ap_fadeAmount3 = 1;
+//blink
+
+
+CapacitiveSensor   cs_5_6 = CapacitiveSensor(5, 6);
+CapacitiveSensor   cs_5_7 = CapacitiveSensor(5, 7);
+CapacitiveSensor   cs_5_8 = CapacitiveSensor(5, 8);
+
+bool stt1 = false;
+bool stt2 = false;
+bool stt3 = false;
+
+int detect1, detect2, detect3 = 0;
+
+long last1 = 0;
+long last2 = 0;
+long last3 = 0;
+
+void setup()
+{
+  //cs_5_6.set_CS_AutocaL_Millis(0xFFFFFFFF);     // turn off autocalibrate on channel 1 - just as an example
+  //cs_5_7.set_CS_AutocaL_Millis(0xFFFFFFFF);
+  //cs_5_8.set_CS_AutocaL_Millis(0xFFFFFFFF);
+
+  Serial.begin(9600);
+  pinMode(rl1, OUTPUT);
+  pinMode(rl2, OUTPUT);
+  pinMode(rl3, OUTPUT);
+
+  pinMode(led1, OUTPUT);
+  pinMode(led2, OUTPUT);
+  pinMode(led3, OUTPUT);
+
+  off_all_relay();
+}
+
+void loop()
+{
+
+  if (e_r) // run mode
+  {
+    long start = millis();
+
+    long total1 =  cs_5_6.capacitiveSensor(30);
+    long total2 =  cs_5_7.capacitiveSensor(30);
+    long total3 =  cs_5_8.capacitiveSensor(30);
+
+    long t = millis() - start;
+    Serial.print(millis() - start);        // check on performance in milliseconds
+    Serial.print("\t");                    // tab character for debug windown spacing
+
+    show_delta(total1, total2, total3);
+    delay(10);
+    long delta1 = total1 - last1;// arbitrary delay to limit data to serial port
+    long delta2 = total2 - last2;
+    long delta3 = total3 - last3;
+    if (delta1 > min1 && delta1 < max1) {
+      stt1 = !stt1;
+    }
+    if (delta2 > min2 && delta2 < max2) {
+      stt2 = !stt2;
+    }
+    if (delta3 > min3 && delta3 < max3) {
+      stt3 = !stt3;
+    }
+    control_relay(); // update relay logic
+
+    last1 = total1;
+    last2 = total2;
+    last3 = total3;
+
+  }
+
+  if (e_w) // config-esp mode
+  {
+    off_all_relay();
+    // set the brightness led
+    analogWrite(led1, brightness1);
+    analogWrite(led2, brightness2);
+    analogWrite(led3, brightness3);
+
+    // change the brightness for next time through the loop:
+    brightness1 = brightness1 + fadeAmount1;
+    brightness2 = brightness2 + fadeAmount2;
+    brightness3 = brightness3 + fadeAmount3;
+
+    // reverse the direction of the fading at the ends of the fade:
+    if (brightness1 == 0 || brightness1 == 255) {
+      fadeAmount1 = -fadeAmount1 ;
+    }
+    if (brightness2 == 0 || brightness2 == 255) {
+      fadeAmount2 = -fadeAmount2 ;
+    }
+    if (brightness3 == 0 || brightness3 == 255) {
+      fadeAmount3 = -fadeAmount3 ;
+      Serial.print(".");
+    }
+    // wait to see the dimming effect
+    delay(2);
+  }
+
+  if (e_mAP)
+  {
+    off_all_relay();
+    off_led_13();
+
+    //analogWrite(led1, ap_brightness1);
+    analogWrite(led2, ap_brightness2);
+    //analogWrite(led3, ap_brightness3);
+
+    // change the brightness for next time through the loop:
+    //ap_brightness1 = ap_brightness1 + ap_fadeAmount1;
+    ap_brightness2 = ap_brightness2 + ap_fadeAmount2;
+    //ap_brightness3 = ap_brightness3 + ap_fadeAmount3;
+
+    /*
+    // reverse the direction of the fading at the ends of the fade:
+    if (ap_brightness1 == 0 || ap_brightness1 == 255) {
+      ap_fadeAmount1 = -ap_fadeAmount1 ;
+    }
+    */
+    if (ap_brightness2 == 0 || ap_brightness2 == 255) {
+      ap_fadeAmount2 = -ap_fadeAmount2 ;
+    }
+    /*
+    if (ap_brightness3 == 0 || ap_brightness3 == 255) {
+      ap_fadeAmount3 = -ap_fadeAmount3 ;
+      Serial.print(".");
+    }
+    */
+    // wait to see the dimming effect
+    delay(2);
+  }
+
+  if (Serial.available()) serialEvent();
+
+}
+
+void serialEvent() {
+
+  uint8_t uart_rx_length = 1; //control 2:0 ~ relay 2-logic 0
+  uint8_t recvState = 0;
+  unsigned long interval = 0;//0 ms
+  unsigned long previousTime, currentTime;
+  String uart_rx = "";
+  uint8_t count = 0;
+  bool stt = false;
+
+  /*
+  test...
+  AA1:0
+  */
+  while (count < ( uart_rx_length + 2)) // + 2 bytes 0xAA start code
+  {
+    if (interval < 6)
+    {
+      if (Serial.available())
+      {
+        char ch = (char)Serial.read();
+        if (recvState == Uart_GETSTARTCODE1)
+        {
+          if (ch == 'A') //START CODE1
+            recvState++;
+        }
+        else if (recvState == Uart_GETSTARTCODE2)
+        {
+          uart_rx_length = 3; // have 2 start code, continue read 3 char off cmd
+          if (ch == 'A') //START CODE2
+            recvState++;
+        }
+        else if (recvState == Uart_GETDATA)
+        {
+          uart_rx += ch;
+        }
+        previousTime = millis();
+        interval = 0;
+        count++;
+      }
+      else
+      {
+        currentTime = millis();
+        interval +=  currentTime - previousTime;
+        previousTime =  currentTime;
+      }
+    }
+    else break; //time out
+  }
+
+  if (uart_rx.length() > 0)
+  {
+    Serial.print("<-- ");
+    Serial.println(uart_rx);
+  }
+
+  if (uart_rx.equals(r)) {
+    e_r = true;
+    e_w = false;
+    e_mAP = false;
+  }
+  if (uart_rx.equals(w)) {
+    e_w = true;
+    e_r = false;
+    e_mAP = false;
+  }
+  if (uart_rx.equals(mAP)) {
+    e_mAP = true;
+    e_r = false;
+    e_w = false;
+  }
+  if (uart_rx[2] == '0') stt = false;
+  if (uart_rx[2] == '1') stt = true;
+  if (uart_rx[0] == '1') stt1 = stt; // set status relay 1
+  if (uart_rx[0] == '2') stt2 = stt; // set status relay 2
+  if (uart_rx[0] == '3') stt3 = stt; // set status relay 3
+
+}
+
+void control_relay() {
+  digitalWrite(rl1, stt1);
+  digitalWrite(led1, !stt1);
+
+  digitalWrite(rl2, stt2);
+  digitalWrite(led2, !stt2);
+
+  digitalWrite(rl3, stt3);
+  digitalWrite(led3, !stt3);
+}
+
+void off_all_relay() {
+  digitalWrite(rl1, 0);
+  digitalWrite(rl2, 0);
+  digitalWrite(rl3, 0);
+}
+
+void off_led_13() {
+  digitalWrite(led1, 0);
+  digitalWrite(led3, 0);
+}
+
+void show_total(long c1, long c2, long c3) {
+  Serial.print(c1);
+  Serial.print("\t");
+  Serial.print(c2);
+  Serial.print("\t");
+  Serial.println(c3);
+}
+
+void show_delta(long d1, long d2, long d3) {
+  Serial.print(d1);
+  Serial.print("\t");
+  Serial.print(d2);
+  Serial.print("\t");
+  Serial.print(d3);
+  Serial.println("\ndelta");
+}
